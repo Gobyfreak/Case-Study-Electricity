@@ -1,0 +1,292 @@
+---
+title: "`data.table` Case Study - Electricity"
+author: "Christos Gkenas"
+date: "`r format(Sys.time(), '%a %d %b %Y (%H:%M:%S)')`"
+output:
+  html_document:
+    highlight: tango
+    theme: united
+    toc: yes
+    toc_depth: 3
+    toc_float:
+      collapsed: no
+      smooth_scroll: no
+  pdf_document:
+    toc: yes
+    toc_depth: '3'
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width="100%")
+
+# Load all the libraries that you will use once here
+library(here)
+library(data.table)
+library(countrycode)
+library(ggplot2)
+library(magrittr)
+library(ggrepel)
+library(knitr)
+library(kableExtra)
+
+# Changing default settings here.
+theme_set(theme_classic(base_size = 16))
+```
+
+# Case Study: Electric power consumption
+
+# Objectives
+
+*Describe the data and its limitations*
+
+## Questions
+
+1)By continent, which countries have the lowest and highest consumption?
+2) By continent, which countries have the lowest and highest percentage change in consumption since 2000?
+3) How does Portugal compare to other EU Countries?
+
+
+
+# Data Details
+
+Download "Electric power consumption (kWh per capita)" data.
+- World Bank Indicator
+: 'EG.USE.ELEC.KH.PC'.
+ 
+- https://data.worldbank.org/indicator/EG.USE.ELEC.KH.PC
+
+
+
+
+# Data Processing
+
+```{r}
+list.files()
+api <- fread(here("data", "Electricity_data.csv"),
+             skip = 4, header = TRUE,
+            check.names = TRUE)
+api
+View(api)
+```
+
+
+```{r readData, warning=FALSE}
+# Add Continent to WiP dataset.
+cl <- as.data.table(codelist)[, .(continent, wb)]
+
+apicl <- merge(api, cl, by.x = "Country.Code", by.y = "wb", all.x = TRUE)
+setnames(apicl, c("continent"), c("Continent"))
+View(apicl)
+
+ED <- melt(apicl,
+           id.vars = c("Continent", "Country.Name", "Country.Code", "Indicator.Code"),
+           measure = patterns("^X"),
+           variable.name = "YearC",
+           value.name = c("elcKW"),
+           na.rm = TRUE)
+View(ED)
+
+# Note cLabel will be used to label the ends of lines in plots.
+ED[, `:=` (Year = as.numeric(gsub("^X", "", YearC)))][
+  , fYear := factor(Year)][
+  , maxYear:=max(Year), by = .(Country.Name)][
+    Year==maxYear, cLabel:=Country.Name][
+      , c("maxYear", "YearC"):=NULL]
+
+setcolorder(ED, c("Indicator.Code", "Continent", "Country.Name", "Country.Code", 
+                  "Year"))
+
+setkeyv(ED, c("Indicator.Code", "Continent", "Country.Name", "Country.Code", "Year"))
+
+ED
+View(ED)
+```
+
+# Analysis
+
+
+## Portugal - Trends and Comparisons
+
+> What are the time trends for Portugal?
+
+Let's start by looking at a plot of how Portugal is performing over time.
+
+```{r PTplot, warning=FALSE}
+ED[Country.Name %in% "Portugal"] %>% 
+ggplot(aes(Year, elcKW)) +
+  geom_line(colour = "blue") + 
+  geom_point(colour = "blue") +
+  scale_x_continuous(breaks=seq(1950, 2015, 5)) +
+  scale_y_continuous(limits=c(0, 5000)) +
+  ggtitle("Portugal") +
+  xlab("Year") +
+  ylab("KW") 
+```
+
+**Interpretation**
+
+In 1990 Portugal had 7.6% women in parliament (i.e. 12.2 men for each woman), which 
+increased to 34.8% (i.e. 1.87 men for each woman) in 2018. This still falls short 
+of 50% (i.e. point of gender parity in parliament).
+
+Let's now plot how Portugal compares with other European countries. As a reference
+the European Union and World averages. Finland, Hungary, Sweden and Romania are highlighted
+for discussion.
+
+```{r PTvsEurope, warning=FALSE}
+WP[Continent == "Europe"] %>%
+  ggplot(aes(Year, pctWiP, group=Country.Name, colour = Country.Name, label = cLabel)) +
+  geom_line(colour="grey90") +
+  geom_line(data = WP[Country.Name %in% c("Portugal", "European Union", "World", 
+                                          "Sweden", "Finland", "Hungary", "Romania")],
+            aes(colour = Country.Name)) +
+  scale_x_continuous(breaks=seq(1990, 2024, 5)) +
+  scale_y_continuous(limits=c(0, 50), breaks=seq(0, 50, by=10)) +
+  expand_limits(x = 2024) +
+  geom_label_repel(data = WP[Country.Name %in% c("Portugal", "European Union", "World", 
+                                                 "Sweden", "Finland", "Hungary", "Romania")],
+                   xlim = c(2018, 2024)) +
+  theme(legend.position = "none") +
+  ggtitle("Portugal compared to European countries") +
+  xlab("Year") +
+  ylab("% Women in Parliament")
+
+```
+
+**Interpretation**
+
+Portugal has had more women in parliament than the European Union average since 2007
+and since around 2000 compared to the world average. Hungary and Romania both had 
+a higher percentage of women in parliament in 1990 (around the end of the Cold War) 
+than they have had since. The key point to note is that none of these countries 
+reaches equality between males and females in parliament, although Sweden and 
+Finland come closest.
+
+
+## Highest Percentages 
+
+> Which countries have the highest percentage of women in parliament by year?  How do continents compare?
+
+```{r highestContinent, collapse=TRUE}
+hgWiP <- WP[!is.na(Continent)][
+  order(Continent, Year, -pctWiP), head(.SD, 1), by = .(Continent, Year)][
+  , CountryWiP := sprintf("%3.1f%% - %s", pctWiP, Country.Name)][
+  , .(Continent, Year, CountryWiP)]
+
+hgCont <- dcast(hgWiP, Year ~ Continent, value.var = "CountryWiP") 
+
+hgCont %>% 
+  kable(align="clllll") %>% 
+  kable_styling(bootstrap_options = "striped")
+```
+
+## No Women in Parliament
+
+Which countries have no (0%) women in parliament?
+
+```{r zeroWiP, collapse=TRUE}
+zeroWiP <- WP[!is.na(Continent) & pctWiP==0]
+
+zeroYear <- zeroWiP[order(Country.Name), .(Year, Country.Name)][
+  , `:=`(N = max(.N)), .(Year)][
+  , toString(paste0('"', Country.Name, '"')), by = .(Year, N)][order(Year)]
+setnames(zeroYear, c("V1"), c("zeroWiP"))
+
+zeroYear %>% 
+  kable(align="lrl", col.names = c("Year", "Num", "Countries without any Women in Parliament")) %>% 
+  kable_styling(bootstrap_options = "striped") %>% 
+  column_spec(1, bold = T)
+```
+
+
+## Global Trends
+
+> What are the global trends over time?
+
+In the following each country has been plotted as a line and the world "average" is
+highlighted in blue. 
+
+```{r globalTrendsLines, warning=FALSE}
+WP[!is.na(Continent)] %>%
+  ggplot(aes(Year, pctWiP, group = Country.Name, label = cLabel)) +
+  geom_line(colour="grey90") +
+  geom_line(data=WP[Country.Name=="World"], colour="blue") +
+  expand_limits(x = 2021) +
+  geom_label_repel(data = WP[Country.Name=="World"], 
+                   xlim = c(2018, 2021), colour = "Blue") +
+  theme(legend.position = "none") +
+  scale_x_continuous(breaks=seq(1990, 2021, 5)) +
+  scale_y_continuous(limits=c(0, 70), breaks=seq(0, 70, by=10)) +
+  ggtitle("Women in Parliament: Global Trends") +
+  ylab("% Women in Parliament")
+```
+
+A box whisker plot is better suited to present the variation (uncertainty) over
+time.
+
+```{r globalTrendsBoxplot, message=FALSE}
+WP[!is.na(Continent)] %>%
+  ggplot(aes(fYear, pctWiP)) +
+  geom_boxplot(width = 0.25, outlier.size = .5) +
+  scale_x_discrete(breaks=seq(1990, 2020, 2)) + 
+  scale_y_continuous(limits=c(0, 70), breaks=seq(0, 70, by=10)) +
+  ggtitle("Box Whisker Plot for countries") +
+  ylab("% Women in Parliament") +
+  xlab("Year") 
+```
+
+### Continents
+
+We can look at the global trends by continent for comparison.
+
+```{r continent TrendsBoxplot, message=FALSE}
+# First add observations for "World" as a continent.
+wWP <- rbindlist(list(WP[!is.na(Continent)], 
+                 WP[!is.na(Continent)][, Continent:="World"]))
+
+wWP %>%
+  ggplot(aes(fYear, pctWiP)) +
+  geom_boxplot(width = 0.4, outlier.size = .5) +
+  geom_line(data = WP[Country.Name=="World"][
+    , .(fYear, pctWiP, Country.Name)], 
+    aes(fYear, y = pctWiP, group = Country.Name), colour = "darkred") +
+  scale_x_discrete(breaks=seq(1990, 2020, 5)) + 
+  scale_y_continuous(limits=c(0, 70), breaks=seq(0, 70, by=20)) +
+  facet_wrap(~Continent) +
+  ggtitle("Box Whisker Plot for countries") +
+  ylab("% Women in Parliament") +
+  xlab("Year")+
+  theme_classic(base_size=11) +
+  labs(caption = "The red line is the world average.")
+```
+
+
+**Interpretation**
+
+Although the world average is going up there is still large variation between countries. 
+The interpretation by continent is similar. Note that in earlier years fewer countries 
+provided data so there is likely to be some bais in the plots above.
+
+# Conclusions
+
+```{r worldConclusions, echo=FALSE}
+pctWiPLast <- WP[Country.Name=="World"][order(Year), .SD[.N]][, pctWiP]
+ratioWiPLast <- WP[Country.Name=="World"][order(Year), .SD[.N]][, Ratio]
+yearLast <- WP[Country.Name=="World"][order(Year), .SD[.N]][, Year]
+```
+
+In `r yearLast`, globally there were `r sprintf("%3.1f%%", pctWiPLast)` women in parliament, 
+i.e, for every woman in parliament there was `r sprintf("%2.1f", ratioWiPLast)` men 
+in parliament. Whichever way we look at the data the conclusions is that, in general, 
+the percentage of women in parliament is increasing but that gender parity in most 
+parliaments is still far-off.
+
+<hr>
+
+# Session Information
+
+```{r sessionInfo, echo=TRUE}
+sessionInfo()
+```
+

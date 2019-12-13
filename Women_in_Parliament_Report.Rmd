@@ -1,6 +1,6 @@
 ---
-title: "`data.table` Case Study - Women in Parliament"
-author: "Saghir Bashir"
+title: "`data.table` Case Study - Electricity"
+author: "Christos Gkenas"
 date: "`r format(Sys.time(), '%a %d %b %Y (%H:%M:%S)')`"
 output:
   html_document:
@@ -34,137 +34,73 @@ library(kableExtra)
 theme_set(theme_classic(base_size = 16))
 ```
 
-# Case Study: Women in Parliament
+# Case Study: Electric power consumption
 
 # Objectives
 
-*Explore the geographical and time trends for the percentage of women in 
-national parliaments.*
+*Describe the data and its limitations*
 
 ## Questions
 
-The objective is to look at the geographical and time trends in the data. We will
-answer the following questions.
+1)By continent, which countries have the lowest and highest consumption?
+2) By continent, which countries have the lowest and highest percentage change in consumption since 2000?
+3) How does Portugal compare to other EU Countries?
 
-+ What are the time trends for Portugal?
-+ How does Portugal compare to other countries?
-+ Which countries have the highest percentage of women in parliament by year?
-+ How do continents compare?
-+ What are the global trends over time?
+
 
 # Data Details
 
-The raw data for *"Proportion of seats held by women in national parliaments"* 
-includes the percentage of women in parliament (_"single or lower parliamentary chambers 
-only"_) by country (region) and year. It can be downloaded from:
+Download "Electric power consumption (kWh per capita)" data.
+- World Bank Indicator
+: 'EG.USE.ELEC.KH.PC'.
+ 
+- https://data.worldbank.org/indicator/EG.USE.ELEC.KH.PC
 
-- https://data.worldbank.org/indicator/SG.GEN.PARL.ZS 
 
-As part of its "open data" mission the World Bank offers _"free and open access 
-to global development data"_ kindly licensed under the "Creative Commons Attribution 
-4.0 (CC-BY 4.0)".
-
-## Source Data
-
-The data originates from the "Inter-Parliamentary Union" (IPU) which
-provides an *_"Archive of statistical data on the percentage of women in 
-national parliaments"_* going back to 1997 on a monthly basis:
-
-- http://archive.ipu.org/wmn-e/classif-arc.htm
-
-The World Bank data is for “single or lower parliamentary chambers only”, while 
-the IPU also presents data for “Upper Houses or Senates”. Moreover, the IPU provides 
-the actual numbers used to calculate the percentages (which the World Bank does not).
-
-## Data limitations
-
-Take caution when interpreting these data, as parliamentary systems vary from country 
-to country, and in some cases over time. Some of the issues to consider include:
-
-- Who has, and who does not have, the right to become a Member of Parliament (MP)?
-- How does someone become an MP? Through democratic elections? How is "democratic
-election" defined? 
-- What is the real power of MPs and their parliament? Can MPs make a difference?
-
-## Data definitions & assumptions
-
-### "Women"
-
-The definition for “women” is not given, so we will assume that it refers to a 
-binary classification for gender (sex).
-
-### "Country (Region)"
-
-The definition of countries and regions can change over time.  (e.g. formation of new
-countries after conflicts, new member states joining a pre-existing collective). 
-How are these changes reflected in the data? How do they affect the interpretation? 
-
-For example, the “European Union” has changed over time. It started in the 1950s as 
-a block of six European countries (known as the “European Community”) and has expanded 
-over the years to 28 countries (with the United Kingdom about to depart). This raises 
-the question of how the European Union average is calculated. For a given year, is it 
-calculated based on the actual member states in that year or on all of the current 
-member states?
-
-```{r dataSource, message=FALSE, echo=FALSE}
-wbCSVs <- list.files(here("data"), full.names = FALSE, pattern = "[.]csv$")
-metaInd <- wbCSVs[grepl("indicator", wbCSVs, ignore.case = TRUE)]
-indInfo <- fread(here("data", metaInd), 
-                   header = TRUE)
-indName <- indInfo[, INDICATOR_NAME]
-```
-
-## World Bank Datasets
-
-The World Banks provides the following data files.
-```{r datasetsWB, echo=TRUE}
-wbFiles <- list.files(here("data"), full.names = FALSE)
-indData <- wbFiles[grepl("^API", wbFiles)]
-indMeta <- wbFiles[grepl("Indicator", wbFiles)]
-ctyMeta <- wbFiles[grepl("Country", wbFiles)]
-```
-
-+ "**`r indData`**" contains the "`r indName`" data.
-+ "**`r indMeta`**" contains the indicator meta data which is as described above. 
-+ "**`r ctyMeta`**" contains the Country related meta data that can be useful to
-understand the limitations of the data by country.
 
 
 # Data Processing
 
-The World Bank's "Women in Parliament" data are imported and undergo some "tidying"
-before being used for the analyses in the sections below.
+```{r}
+list.files()
+api <- fread(here("data", "Electricity_data.csv"),
+             skip = 4, header = TRUE,
+            check.names = TRUE)
+api
+View(api)
+```
+
 
 ```{r readData, warning=FALSE}
-wip <- fread(here("data", indData), 
-            skip = 4, header = TRUE,
-            check.names = TRUE)
-
 # Add Continent to WiP dataset.
 cl <- as.data.table(codelist)[, .(continent, wb)]
 
-wipcl <- merge(wip, cl, by.x = "Country.Code", by.y = "wb", all.x = TRUE)
-setnames(wipcl, c("continent"), c("Continent"))
+apicl <- merge(api, cl, by.x = "Country.Code", by.y = "wb", all.x = TRUE)
+setnames(apicl, c("continent"), c("Continent"))
+View(apicl)
 
-WP <- melt(wipcl,
+ED <- melt(apicl,
            id.vars = c("Continent", "Country.Name", "Country.Code", "Indicator.Code"),
            measure = patterns("^X"),
            variable.name = "YearC",
-           value.name = c("pctWiP"),
+           value.name = c("elcKW"),
            na.rm = TRUE)
+View(ED)
 
 # Note cLabel will be used to label the ends of lines in plots.
-WP[, `:=`(Year = as.numeric(gsub("^X", "", YearC)), Ratio = (100 - pctWiP)/pctWiP)][
+ED[, `:=` (Year = as.numeric(gsub("^X", "", YearC)))][
   , fYear := factor(Year)][
   , maxYear:=max(Year), by = .(Country.Name)][
     Year==maxYear, cLabel:=Country.Name][
       , c("maxYear", "YearC"):=NULL]
 
-setcolorder(WP, c("Indicator.Code", "Continent", "Country.Name", "Country.Code", 
-                  "Year", "pctWiP", "Ratio"))
-setkeyv(WP, c("Indicator.Code", "Continent", "Country.Name", "Country.Code", "Year"))
+setcolorder(ED, c("Indicator.Code", "Continent", "Country.Name", "Country.Code", 
+                  "Year"))
 
-WP
+setkeyv(ED, c("Indicator.Code", "Continent", "Country.Name", "Country.Code", "Year"))
+
+ED
+View(ED)
 ```
 
 # Analysis
@@ -177,15 +113,15 @@ WP
 Let's start by looking at a plot of how Portugal is performing over time.
 
 ```{r PTplot, warning=FALSE}
-WP[Country.Name %in% "Portugal"] %>% 
-ggplot(aes(Year, pctWiP)) +
+ED[Country.Name %in% "Portugal"] %>% 
+ggplot(aes(Year, elcKW)) +
   geom_line(colour = "blue") + 
   geom_point(colour = "blue") +
-  scale_x_continuous(breaks=seq(1990, 2020, 5)) +
-  scale_y_continuous(limits=c(0, 50)) +
+  scale_x_continuous(breaks=seq(1950, 2015, 5)) +
+  scale_y_continuous(limits=c(0, 5000)) +
   ggtitle("Portugal") +
   xlab("Year") +
-  ylab("% Women in Parliament") 
+  ylab("KW") 
 ```
 
 **Interpretation**

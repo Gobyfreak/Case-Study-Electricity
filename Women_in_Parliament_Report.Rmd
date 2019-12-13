@@ -151,7 +151,6 @@ ED[Continent == "Europe"] %>%
   ggtitle("Portugal compared to European countries") +
   xlab("Year") +
   ylab("KW")
-
 ```
 
 **Interpretation**
